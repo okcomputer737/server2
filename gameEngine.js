@@ -18,18 +18,25 @@ function startGame(io, roomCode, room) {
   const settings = room.settings || {};
   const columns = THEMES[settings.theme || "classic"];
   const letter = LETTERS[Math.floor(Math.random() * LETTERS.length)];
+  const nextRound = (gameState[roomCode]?.round || 0) + 1;
 
-  gameState[roomCode] = {
-    phase: "play",
-    letter,
-    time: settings.roundTime || 10,
-    theme: settings.theme || "classic",
-    columns,
-    round: (gameState[roomCode]?.round || 0) + 1,
-  };
+  // Geri sayım ekranı için önce countdown eventi gönder
+  io.to(roomCode).emit("game_countdown", { letter, columns, round: nextRound });
 
-  io.to(roomCode).emit("game_state", gameState[roomCode]);
-  startTimer(io, roomCode, room);
+  // 3 saniye sonra gerçek oyunu başlat
+  setTimeout(() => {
+    if (!room.players?.length) return;
+    gameState[roomCode] = {
+      phase: "play",
+      letter,
+      time: settings.roundTime || 10,
+      theme: settings.theme || "classic",
+      columns,
+      round: nextRound,
+    };
+    io.to(roomCode).emit("game_state", gameState[roomCode]);
+    startTimer(io, roomCode, room);
+  }, 3000);
 }
 
 function submitWord(roomCode, userId, payload) {
