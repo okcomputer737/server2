@@ -4,12 +4,11 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
+const path = require("path");
 
 const { createRoom, addPlayer, removePlayer, getRoom, addScore } = require("./roomManager");
-const { startGame, submitWord, calculateScores } = require("./gameEngine");
+const { startGame, submitWord, setEarlySubmitter, calculateScores } = require("./gameEngine");
 const { handleVote, getFinalVotes, clearVotes } = require("./voteEngine");
-
-const path = require("path");
 
 const app = express();
 app.use(cors());
@@ -20,9 +19,9 @@ app.get("/{*path}", (req, res) => {
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
-// Debate ready takibi
-const debateReady = {}; // roomCode → Set<userId>
-const nextRoundLock = {}; // roomCode → bool — çift tetiklenmeyi önler
+const debateReady = {};  // roomCode → Set<userId>
+const scoreReady = {};   // roomCode → Set<userId>
+const nextRoundLock = {}; // roomCode → bool
 
 function broadcastRoomUpdate(roomCode) {
   const room = getRoom(roomCode);
@@ -66,7 +65,7 @@ io.on("connection", (socket) => {
     addPlayer(room, socket, username, uid);
     room.settings = room.settings || { theme: "classic", roundTime: 10, scoreLimit: 100 };
     socket.join(code);
-    console.log(`🚪 "${username}" joined ${code} | players: ${room.players.map(p => p.username)}`);
+    console.log(`🚪 "${username}" joined ${code}`);
     socket.emit("room_joined", { code: room.code, type: room.type, settings: room.settings });
     broadcastRoomUpdate(code);
   });
@@ -75,7 +74,6 @@ io.on("connection", (socket) => {
   socket.on("request_room_state", (roomCode) => {
     const room = getRoom(roomCode);
     if (!room) return;
-    console.log(`🔄 request_room_state for ${roomCode} by ${socket.id}`);
     socket.emit("room_update", {
       code: room.code, type: room.type, players: room.players,
       settings: room.settings, readyPlayers: Array.from(room.readyPlayers || []),
@@ -89,7 +87,6 @@ io.on("connection", (socket) => {
     const uid = socket.data.userId;
     if (room.readyPlayers.has(uid)) room.readyPlayers.delete(uid);
     else room.readyPlayers.add(uid);
-    console.log(`✅ ready toggle: ${uid} | ready: ${Array.from(room.readyPlayers)}`);
     broadcastRoomUpdate(roomCode);
     if (room.players.length >= 1 && room.players.every(p => room.readyPlayers.has(p.userId))) {
       console.log(`🚀 All ready in ${roomCode}, auto-starting...`);
@@ -99,24 +96,30 @@ io.on("connection", (socket) => {
 
   // ── MANUEL BAŞLAT ──
   socket.on("start_game", (roomCode) => {
-    console.log(`🎮 start_game for ${roomCode}`);
     const room = getRoom(roomCode);
     if (!room) return;
     startGame(io, roomCode, room);
   });
 
-  // ── KELİME GÖNDER (her değişiklikte çağrılır, üzerine yazar) ──
+  // ── KELİME GÖNDER ──
   socket.on("submit_words", ({ roomCode, words }) => {
     const userId = socket.data.userId;
     if (!userId) return;
-    submitWord(roomCode, userId, words); // submitWord zaten üzerine yazıyor
-    // Sadece boş olmayan submit'leri logla
+    submitWord(roomCode, userId, words);
     if (words.some(w => w)) console.log(`📝 words uid="${userId}": ${JSON.stringify(words)}`);
+  });
+
+  // ── BONUSLU GÖNDER ──
+  socket.on("bonus_submit", ({ roomCode, words }) => {
+    const userId = socket.data.userId;
+    if (!userId) return;
+    submitWord(roomCode, userId, words);
+    setEarlySubmitter(roomCode, userId);
+    console.log(`⭐ bonus_submit uid="${userId}": ${JSON.stringify(words)}`);
   });
 
   // ── OY VER ──
   socket.on("vote_cell", ({ roomCode, targetPlayerId, columnIndex }) => {
-    console.log(`🗳️  vote: ${socket.id} → ${targetPlayerId}_${columnIndex}`);
     const room = getRoom(roomCode);
     if (!room) return;
     handleVote(io, room, roomCode, socket, targetPlayerId, columnIndex);
@@ -129,52 +132,57 @@ io.on("connection", (socket) => {
     const uid = socket.data.userId;
     if (!debateReady[roomCode]) debateReady[roomCode] = new Set();
     debateReady[roomCode].add(uid);
-    console.log(`🏁 debate_ready: ${uid} | ready: ${debateReady[roomCode].size}/${room.players.length}`);
 
-    // Hazır sayısını herkese bildir
     io.to(roomCode).emit("debate_ready_update", {
       readyCount: debateReady[roomCode].size,
       totalCount: room.players.length,
       readyPlayers: Array.from(debateReady[roomCode]),
     });
 
-    // Herkes hazırsa puanla ve sonraki round'a geç
     if (debateReady[roomCode].size >= room.players.length) {
-      console.log(`✅ All debate ready in ${roomCode}, calculating scores...`);
-      debateReady[roomCode] = new Set(); // sıfırla
-
-      // Oylamaları bitir ve puanla
+      debateReady[roomCode] = new Set();
       _finishAndScore(io, roomCode, room);
     }
   });
 
-  // ── DEBATE BİTTİ (manuel buton) ──
+  // ── DEBATE BİTTİ ──
   socket.on("finish_debate", ({ roomCode }) => {
-    console.log(`🏁 finish_debate for ${roomCode}`);
     const room = getRoom(roomCode);
     if (!room) return;
     if (debateReady[roomCode]) debateReady[roomCode] = new Set();
     _finishAndScore(io, roomCode, room);
   });
 
-  // ── SONRAKI ROUND ──
-  socket.on("next_round", (roomCode) => {
-    if (nextRoundLock[roomCode]) return; // çift tetiklenmeyi önle
-    nextRoundLock[roomCode] = true;
-    setTimeout(() => { delete nextRoundLock[roomCode]; }, 3000);
-
-    console.log(`⏭️  next_round for ${roomCode}`);
+  // ── SKOR READY (tüm oyuncular hazır olunca sonraki round) ──
+  socket.on("score_ready", (roomCode) => {
     const room = getRoom(roomCode);
-    if (!room) { console.log(`❌ room not found: ${roomCode}`); return; }
-    room.readyPlayers = new Set();
-    if (debateReady[roomCode]) debateReady[roomCode] = new Set();
-    startGame(io, roomCode, room);
+    if (!room) return;
+    const uid = socket.data.userId;
+    if (!scoreReady[roomCode]) scoreReady[roomCode] = new Set();
+    scoreReady[roomCode].add(uid);
+
+    console.log(`🏁 score_ready: ${uid} | ${scoreReady[roomCode].size}/${room.players.length}`);
+
+    io.to(roomCode).emit("score_ready_update", {
+      readyCount: scoreReady[roomCode].size,
+      totalCount: room.players.length,
+    });
+
+    if (scoreReady[roomCode].size >= room.players.length) {
+      if (nextRoundLock[roomCode]) return;
+      nextRoundLock[roomCode] = true;
+      setTimeout(() => { delete nextRoundLock[roomCode]; }, 3000);
+
+      scoreReady[roomCode] = new Set();
+      room.readyPlayers = new Set();
+      if (debateReady[roomCode]) debateReady[roomCode] = new Set();
+      startGame(io, roomCode, room);
+    }
   });
 
   // ── CHAT ──
   socket.on("chat_message", ({ roomCode, message }) => {
     const username = socket.data.username || "?";
-    console.log(`💬 [${roomCode}] ${username}: ${message}`);
     io.to(roomCode).emit("chat_message", { username, message, timestamp: Date.now() });
   });
 
@@ -207,7 +215,6 @@ function _finishAndScore(io, roomCode, room) {
     });
   } else {
     const totalScores = room.players.map(p => ({ userId: p.userId, username: p.username, score: p.score }));
-    console.log(`📈 Scores: ${JSON.stringify(totalScores)}`);
     io.to(roomCode).emit("score_update", { roundScores, totalScores });
   }
 }

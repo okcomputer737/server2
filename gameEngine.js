@@ -1,26 +1,22 @@
 let gameState = {};
 let timers = {};
 let submissions = {};
+let earlySubmitters = {}; // roomCode → Set<userId>
 
-const LETTERS = "ABCDEFGHIJKLMNOPRSTUVYZÇĞİÖŞÜ";
+const LETTERS = "ABCDEFGHIJKLMNOPRSTUVYZÇİÖŞÜ"; // Ğ kaldırıldı
 const THEMES = {
   classic: ["İsim", "Şehir", "Hayvan", "Bitki", "Eşya"],
   fame: ["Şarkıcı", "Oyuncu", "Sporcu", "İnfluencer", "Ünlü"],
 };
 
-// =====================
-// START GAME
-// =====================
 function startGame(io, roomCode, room) {
   if (!room || !room.players?.length) return;
 
-  // reset round data
   submissions[roomCode] = {};
+  earlySubmitters[roomCode] = new Set();
 
   const settings = room.settings || {};
   const columns = THEMES[settings.theme || "classic"];
-
-  // DÜZELTME: letter tanımlanmadığı için hata veriyordu, şimdi rastgele seçiliyor
   const letter = LETTERS[Math.floor(Math.random() * LETTERS.length)];
 
   gameState[roomCode] = {
@@ -33,21 +29,19 @@ function startGame(io, roomCode, room) {
   };
 
   io.to(roomCode).emit("game_state", gameState[roomCode]);
-
   startTimer(io, roomCode, room);
 }
 
-// =====================
-// SUBMIT WORD (PLAY PHASE)
-// =====================
 function submitWord(roomCode, userId, payload) {
   if (!submissions[roomCode]) submissions[roomCode] = {};
   submissions[roomCode][userId] = payload;
 }
 
-// =====================
-// TIMER
-// =====================
+function setEarlySubmitter(roomCode, userId) {
+  if (!earlySubmitters[roomCode]) earlySubmitters[roomCode] = new Set();
+  earlySubmitters[roomCode].add(userId);
+}
+
 function startTimer(io, roomCode, room) {
   if (timers[roomCode]) {
     clearInterval(timers[roomCode]);
@@ -59,21 +53,16 @@ function startTimer(io, roomCode, room) {
     if (!state) return;
 
     state.time--;
-
     io.to(roomCode).emit("game_state", state);
 
     if (state.time <= 0) {
       clearInterval(timers[roomCode]);
       delete timers[roomCode];
-
       startDebate(io, roomCode, room);
     }
   }, 1000);
 }
 
-// =====================
-// DEBATE PHASE
-// =====================
 function startDebate(io, roomCode, room) {
   const state = gameState[roomCode];
   if (!state) return;
@@ -91,7 +80,6 @@ function startDebate(io, roomCode, room) {
       const word = playerSub ? playerSub[colIndex] : "";
       if (!word || word.trim() === "") return;
 
-      // Yanlış harfle başlayan kelimeleri işaretle
       if (word.trim()[0]?.toUpperCase() !== state.letter) {
         wrongLetterCells[`${p.userId}_${colIndex}`] = true;
       } else {
@@ -117,9 +105,6 @@ function startDebate(io, roomCode, room) {
   });
 }
 
-// =====================
-// SCORE HESAPLAMA
-// =====================
 function calculateScores(roomCode, invalidCells, room) {
   const subs = submissions[roomCode] || {};
   const state = gameState[roomCode];
@@ -127,15 +112,14 @@ function calculateScores(roomCode, invalidCells, room) {
 
   const columns = state.columns;
   const scores = {};
+  const bonusIssues = {}; // userId → true if any issue exists
 
-  // Her oyuncuya 0'dan başla
   room.players.forEach((p) => {
     scores[p.userId] = 0;
+    bonusIssues[p.userId] = false;
   });
 
-  // Her sütun için ayrı ayrı hesapla
   columns.forEach((col, colIndex) => {
-    // Bu sütundaki geçerli cevapları topla
     const validAnswers = [];
 
     room.players.forEach((p) => {
@@ -143,37 +127,44 @@ function calculateScores(roomCode, invalidCells, room) {
       const word = playerSub ? playerSub[colIndex] : "";
       const cellId = p.userId + "_" + colIndex;
       const isInvalid = invalidCells && invalidCells[cellId]?.isInvalid;
-      const isWrongLetter = word.trim() !== "" && word.trim()[0]?.toUpperCase() !== state.letter;
+      const isWrongLetter = word && word.trim() !== "" && word.trim()[0]?.toUpperCase() !== state.letter;
 
-      if (!word || word.trim() === "" || isInvalid || isWrongLetter) return;
+      if (!word || word.trim() === "" || isInvalid || isWrongLetter) {
+        bonusIssues[p.userId] = true;
+        return;
+      }
 
       validAnswers.push({ userId: p.userId, word: word.trim().toLowerCase() });
     });
 
-    // Benzerlik kontrolü: %70 benzer kelimeler varsa baz puan 5'e düşer
     const similarGroups = findSimilarGroups(validAnswers);
 
-    validAnswers.forEach(({ userId, word }) => {
-      // Bu kelime benzer grup içinde mi?
+    validAnswers.forEach(({ userId }) => {
       const isSimilar = similarGroups.some(
         (group) => group.length > 1 && group.includes(userId)
       );
 
+      if (isSimilar) bonusIssues[userId] = true;
+
       const baseScore = isSimilar ? 5 : 10;
-
-      // Geçerli kelime başına ekstra puan: (geçerli kelime sayısı - 1) * 5
-      // Yani 2 geçerli varsa 5 ekstra, 3 geçerli varsa 10 ekstra gibi
-      const validCount = validAnswers.length;
-      const bonus = (validCount - 1) * 5;
-
+      const bonus = (validAnswers.length - 1) * 5;
       scores[userId] = (scores[userId] || 0) + baseScore + bonus;
     });
+  });
+
+  // Bonuslu Gönder: +25 veya -10
+  const bonusPlayers = earlySubmitters[roomCode] || new Set();
+  bonusPlayers.forEach(userId => {
+    if (!bonusIssues[userId]) {
+      scores[userId] = (scores[userId] || 0) + 25;
+    } else {
+      scores[userId] = (scores[userId] || 0) - 10;
+    }
   });
 
   return scores;
 }
 
-// İki kelimenin benzerlik oranını hesapla (Levenshtein mesafesi)
 function similarity(a, b) {
   if (a === b) return 1;
   const longer = a.length > b.length ? a : b;
@@ -185,12 +176,8 @@ function similarity(a, b) {
 
 function editDistance(a, b) {
   const matrix = [];
-  for (let i = 0; i <= b.length; i++) {
-    matrix[i] = [i];
-  }
-  for (let j = 0; j <= a.length; j++) {
-    matrix[0][j] = j;
-  }
+  for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
   for (let i = 1; i <= b.length; i++) {
     for (let j = 1; j <= a.length; j++) {
       if (b.charAt(i - 1) === a.charAt(j - 1)) {
@@ -230,11 +217,9 @@ function findSimilarGroups(answers) {
   return groups;
 }
 
-// =====================
-// EXPORT
-// =====================
 module.exports = {
   startGame,
   submitWord,
+  setEarlySubmitter,
   calculateScores,
 };
