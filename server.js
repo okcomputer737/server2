@@ -14,7 +14,7 @@ const path = require("path");
 const app = express();
 app.use(cors());
 app.use(express.static(path.join(__dirname, "web")));
-app.get("*", (req, res) => {
+app.get("/{*path}", (req, res) => {
   res.sendFile(path.join(__dirname, "web", "index.html"));
 });
 const server = http.createServer(app);
@@ -22,6 +22,7 @@ const io = new Server(server, { cors: { origin: "*" } });
 
 // Debate ready takibi
 const debateReady = {}; // roomCode → Set<userId>
+const nextRoundLock = {}; // roomCode → bool — çift tetiklenmeyi önler
 
 function broadcastRoomUpdate(roomCode) {
   const room = getRoom(roomCode);
@@ -158,6 +159,10 @@ io.on("connection", (socket) => {
 
   // ── SONRAKI ROUND ──
   socket.on("next_round", (roomCode) => {
+    if (nextRoundLock[roomCode]) return; // çift tetiklenmeyi önle
+    nextRoundLock[roomCode] = true;
+    setTimeout(() => { delete nextRoundLock[roomCode]; }, 3000);
+
     console.log(`⏭️  next_round for ${roomCode}`);
     const room = getRoom(roomCode);
     if (!room) { console.log(`❌ room not found: ${roomCode}`); return; }
