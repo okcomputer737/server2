@@ -201,4 +201,5 @@ function _finishAndScore(io, roomCode, room) {
   }
 }
 
-server.listen(3000, () => console.log("🚀 Running on 3000"));
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log(`🚀 Running on ${PORT}`));
