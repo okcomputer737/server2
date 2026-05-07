@@ -231,10 +231,21 @@ function getGameState(roomCode) {
   return gameState[roomCode] || null;
 }
 
+function resetGame(roomCode) {
+  if (timers[roomCode]) {
+    clearInterval(timers[roomCode]);
+    delete timers[roomCode];
+  }
+  delete gameState[roomCode];
+  delete submissions[roomCode];
+  delete earlySubmitters[roomCode];
+}
+
 module.exports = {
   startGame,
   submitWord,
   setEarlySubmitter,
   calculateScores,
   getGameState,
+  resetGame,
 };

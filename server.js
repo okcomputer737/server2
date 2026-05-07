@@ -6,8 +6,8 @@ const { Server } = require("socket.io");
 const cors = require("cors");
 const path = require("path");
 
-const { createRoom, addPlayer, removePlayer, getRoom, addScore, getPublicRooms } = require("./roomManager");
-const { startGame, submitWord, setEarlySubmitter, calculateScores, getGameState } = require("./gameEngine");
+const { createRoom, addPlayer, removePlayer, getRoom, addScore, getPublicRooms, rooms } = require("./roomManager");
+const { startGame, submitWord, setEarlySubmitter, calculateScores, getGameState, resetGame } = require("./gameEngine");
 const { handleVote, getFinalVotes, clearVotes } = require("./voteEngine");
 
 const app = express();
@@ -99,12 +99,52 @@ io.on("connection", (socket) => {
     broadcastRoomUpdate(room.code);
   });
 
+  // ── ODADAN ÇIKIŞ (kasıtlı) ──
+  socket.on("leave_room", ({ roomCode }) => {
+    const uid = socket.data.userId;
+    const room = getRoom(roomCode);
+    if (!room) return;
+    room.players = room.players.filter(p => p.userId !== uid);
+    room.readyPlayers?.delete(uid);
+    if (room.scores) delete room.scores[uid];
+    socket.leave(roomCode);
+    if (room.players.length === 0) {
+      setTimeout(() => {
+        const r = getRoom(roomCode);
+        if (r && r.players.length === 0) delete rooms[roomCode];
+        broadcastPublicRooms();
+      }, 10000);
+    } else {
+      broadcastRoomUpdate(roomCode);
+    }
+    broadcastPublicRooms();
+  });
+
+  // ── TEKRAR OYNA ──
+  socket.on("play_again", (roomCode) => {
+    const room = getRoom(roomCode);
+    if (!room) return;
+    room.players.forEach(p => { p.score = 0; if (room.scores) room.scores[p.userId] = 0; });
+    room.readyPlayers = new Set();
+    if (debateReady[roomCode]) debateReady[roomCode] = new Set();
+    if (scoreReady[roomCode]) scoreReady[roomCode] = new Set();
+    resetGame(roomCode);
+    io.to(roomCode).emit("room_reset", { code: roomCode });
+    broadcastRoomUpdate(roomCode);
+    console.log(`🔄 play_again: ${roomCode}`);
+  });
+
   // ── ODAYA KATIL ──
   socket.on("join_room", ({ username, code, userId }) => {
     if (!username || username.trim().length === 0) { socket.emit("error", { message: "Kullanıcı adı boş olamaz" }); return; }
     if (username.trim().length > 16) { socket.emit("error", { message: "Kullanıcı adı en fazla 16 karakter olabilir" }); return; }
     const room = getRoom(code);
     if (!room) { socket.emit("error", { message: "Oda bulunamadı: " + code }); return; }
+    const gs = getGameState(code);
+    if (gs && (gs.phase === "play" || gs.phase === "debate")) {
+      socket.emit("error", { message: "Bu odada oyun devam ediyor, şu an katılamazsın." });
+      return;
+    }
     const uid = userId || socket.id;
     socket.data.userId = uid;
     socket.data.username = username.trim();
