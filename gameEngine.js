@@ -128,6 +128,7 @@ function calculateScores(roomCode, invalidCells, room) {
 
   columns.forEach((col, colIndex) => {
     const validAnswers = [];
+    let nonValidCount = 0; // boş + geçersiz cevap sayısı
 
     room.players.forEach((p) => {
       const playerSub = subs[p.userId];
@@ -138,6 +139,7 @@ function calculateScores(roomCode, invalidCells, room) {
 
       if (!word || word.trim() === "" || isInvalid || isWrongLetter) {
         bonusIssues[p.userId] = true;
+        nonValidCount++;
         return;
       }
 
@@ -154,8 +156,9 @@ function calculateScores(roomCode, invalidCells, room) {
       if (isSimilar) bonusIssues[userId] = true;
 
       const baseScore = isSimilar ? 5 : 10;
-      const bonus = (validAnswers.length - 1) * 5;
-      scores[userId] = (scores[userId] || 0) + baseScore + bonus;
+      const validBonus = (validAnswers.length - 1) * 5; // diğer valid cevaplardan bonus
+      const invalidBonus = nonValidCount * 5;            // boş/geçersiz her cevap için +5
+      scores[userId] = (scores[userId] || 0) + baseScore + validBonus + invalidBonus;
     });
   });
 
@@ -224,9 +227,14 @@ function findSimilarGroups(answers) {
   return groups;
 }
 
+function getGameState(roomCode) {
+  return gameState[roomCode] || null;
+}
+
 module.exports = {
   startGame,
   submitWord,
   setEarlySubmitter,
   calculateScores,
+  getGameState,
 };

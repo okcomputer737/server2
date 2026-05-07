@@ -6,8 +6,8 @@ const { Server } = require("socket.io");
 const cors = require("cors");
 const path = require("path");
 
-const { createRoom, addPlayer, removePlayer, getRoom, addScore } = require("./roomManager");
-const { startGame, submitWord, setEarlySubmitter, calculateScores } = require("./gameEngine");
+const { createRoom, addPlayer, removePlayer, getRoom, addScore, getPublicRooms } = require("./roomManager");
+const { startGame, submitWord, setEarlySubmitter, calculateScores, getGameState } = require("./gameEngine");
 const { handleVote, getFinalVotes, clearVotes } = require("./voteEngine");
 
 const app = express();
@@ -23,6 +23,10 @@ const debateReady = {};  // roomCode → Set<userId>
 const scoreReady = {};   // roomCode → Set<userId>
 const nextRoundLock = {}; // roomCode → bool
 
+function broadcastPublicRooms() {
+  io.to("__public_lobby__").emit("public_rooms", getPublicRooms());
+}
+
 function broadcastRoomUpdate(roomCode) {
   const room = getRoom(roomCode);
   if (!room) return;
@@ -33,10 +37,52 @@ function broadcastRoomUpdate(roomCode) {
     settings: room.settings,
     readyPlayers: Array.from(room.readyPlayers || []),
   });
+  broadcastPublicRooms(); // public lobby'yi de güncelle
 }
 
 io.on("connection", (socket) => {
   console.log("🟢 Connected:", socket.id);
+
+  // ── PUBLIC LOBBY ──
+  socket.on("join_public_lobby", () => {
+    socket.join("__public_lobby__");
+    socket.emit("public_rooms", getPublicRooms());
+  });
+
+  socket.on("leave_public_lobby", () => {
+    socket.leave("__public_lobby__");
+  });
+
+  // ── RECONNECT: mevcut oyun durumunu gönder ──
+  socket.on("reconnect_to_room", ({ roomCode, userId }) => {
+    const room = getRoom(roomCode);
+    if (!room) { socket.emit("reconnect_failed", { message: "Oda bulunamadı veya süresi doldu" }); return; }
+
+    const player = room.players.find((p) => p.userId === userId);
+    if (!player) { socket.emit("reconnect_failed", { message: "Oyuncu bulunamadı" }); return; }
+
+    // Socket bilgilerini güncelle
+    socket.data.userId = userId;
+    socket.data.username = player.username;
+    player.id = socket.id;
+    socket.join(roomCode);
+
+    const gs = getGameState(roomCode);
+    socket.emit("reconnect_success", {
+      roomCode,
+      gameState: gs,
+      roomType: room.type,
+      settings: room.settings,
+    });
+
+    // Mevcut oyun fazına göre veri gönder
+    if (gs?.phase === "play") {
+      socket.emit("game_state", gs);
+    }
+
+    broadcastRoomUpdate(roomCode);
+    console.log(`🔄 Reconnect: "${player.username}" → ${roomCode}`);
+  });
 
   // ── ODA OLUŞTUR ──
   socket.on("create_room", ({ username, type, theme, roundTime, scoreLimit, userId }) => {

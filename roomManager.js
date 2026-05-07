@@ -58,7 +58,7 @@ function removePlayer(socket) {
     const isInRoom = room.players.some((p) => p.userId === userId);
     if (!isInRoom) continue;
 
-    // 3 saniye bekle, reconnect olursa silme
+    // 30 saniye bekle — telefon kapandı/bağlantı koptu durumunda reconnect için süre tanı
     setTimeout(() => {
       const room = rooms[code];
       if (!room) return;
@@ -68,8 +68,21 @@ function removePlayer(socket) {
       if (room.players.length === 0) {
         delete rooms[code];
       }
-    }, 3000);
+    }, 30000);
   }
+}
+
+function getPublicRooms() {
+  return Object.values(rooms)
+    .filter((r) => r.type === "public")
+    .map((r) => ({
+      code: r.code,
+      playerCount: r.players.length,
+      players: r.players.map((p) => p.username),
+      theme: r.settings?.theme || "classic",
+      roundTime: r.settings?.roundTime || 10,
+      scoreLimit: r.settings?.scoreLimit || 100,
+    }));
 }
 
 function getRoom(code) {
@@ -95,5 +108,6 @@ module.exports = {
   removePlayer,
   getRoom,
   addScore,
+  getPublicRooms,
   rooms,
 };
