@@ -7,6 +7,7 @@ const LETTERS = "ABCDEFGHIJKLMNOPRSTUVYZÇİÖŞÜ"; // Ğ kaldırıldı
 const THEMES = {
   classic: ["İsim", "Şehir", "Hayvan", "Bitki", "Eşya"],
   fame: ["Şarkıcı", "Oyuncu", "Sporcu", "İnfluencer", "Ünlü"],
+  football: ["Futbolcu", "Takım", "Ülke", "Sporcu", "Jübile"],
 };
 
 function startGame(io, roomCode, room) {
