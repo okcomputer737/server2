@@ -7,8 +7,8 @@ const THEMES = {
   classic:   { columns: ["İsim", "Şehir", "Hayvan", "Bitki", "Eşya"],          lang: "TR" },
   fame:      { columns: ["Şarkıcı", "Oyuncu", "Sporcu", "İnfluencer", "Ünlü"],  lang: "TR" },
   football:  { columns: ["Futbolcu", "Takım", "Ülke", "Sporcu", "Jübile"],      lang: "TR" },
-  wrestling: { columns: ["Güreşçi", "Eski Güreşçi", "Moveset", "Güreş Ünlüsü"],lang: "EN" },
-  dunya:     { columns: ["Şehir", "Ülke", "Yemek", "Eser", "Meslek"],           lang: "TR" },
+  wrestling: { columns: ["Güreşçi", "Eski Güreşçi", "Moveset"],                  lang: "EN" },
+  dunya:     { columns: ["Şehir", "Ülke", "Yemek", "Dizi/Film/Eser", "Meslek"], lang: "TR" },
   aviation:  { columns: ["Airport", "Şehir", "Ülke"],                            lang: "TR" },
 };
 
