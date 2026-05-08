@@ -45,6 +45,7 @@ function getNextLetter(roomCode, lang) {
   return letterQueues[roomCode].pop();
 }
 
+// Returns ordered question keys: ["kim", ...middles..., "ne_yapiyor"]
 function buildQuestions(playerCount) {
   const n = Math.max(2, Math.min(playerCount, 5));
   const questions = ["kim"];
@@ -58,36 +59,51 @@ function buildQuestions(playerCount) {
 }
 
 function startRound(io, roomCode, room) {
-  if (!room || !room.players?.length) return;
+  if (!room || !room.players?.length || room.players.length < 2) return;
 
   room.readyPlayers = new Set();
 
   const lang = room.settings?.lang || "TR";
-  const questionKeys = buildQuestions(room.players.length);
+  const questionKeys = buildQuestions(room.players.length); // e.g. ["kim", "nerede", "ne_yapiyor"]
   const letter = getNextLetter(roomCode, lang);
   const round = (roundData[roomCode]?.round || 0) + 1;
-
   const labels = getLabels(lang);
-  roundData[roomCode] = { questionKeys, letter, submissions: {}, round, lang, totalPlayers: room.players.length };
+
+  // Shuffle player order → each gets a unique question slot
+  const shuffledPlayers = [...room.players].sort(() => Math.random() - 0.5);
+  const assignments = {}; // userId → questionIndex (slot in questionKeys)
+  shuffledPlayers.forEach((p, i) => { assignments[p.userId] = i; });
+
+  roundData[roomCode] = {
+    questionKeys, assignments, letter, submissions: {},
+    round, lang, totalPlayers: room.players.length,
+  };
 
   if (roundTimers[roomCode]) { clearTimeout(roundTimers[roomCode]); }
 
-  io.to(roomCode).emit("ne_alaka_state", {
-    letter,
-    questions: questionKeys.map(k => labels[k]),
-    questionKeys,
-    round,
-    lang,
-    totalPlayers: room.players.length,
+  // Send each player their own question only
+  room.players.forEach(player => {
+    const qIndex = assignments[player.userId];
+    const qLabel = labels[questionKeys[qIndex]];
+    io.to(player.id).emit("ne_alaka_state", {
+      letter,
+      question: qLabel,      // single question for this player
+      questionIndex: qIndex,
+      round,
+      lang,
+      totalPlayers: room.players.length,
+    });
   });
 
-  // Fallback timer: 60s in case someone never submits
+  // Fallback: 60s in case someone disconnects without submitting
   roundTimers[roomCode] = setTimeout(() => revealResults(io, roomCode, room), 60000);
 }
 
 function submitAnswers(io, roomCode, room, userId, answers) {
   if (!roundData[roomCode]) return;
-  roundData[roomCode].submissions[userId] = answers;
+  // answers is a single-element array or string; normalize to string
+  const answer = Array.isArray(answers) ? (answers[0] || "") : (answers || "");
+  roundData[roomCode].submissions[userId] = answer;
 
   const submittedCount = Object.keys(roundData[roomCode].submissions).length;
   const totalCount = room.players.length;
@@ -106,20 +122,21 @@ function revealResults(io, roomCode, room) {
   const data = roundData[roomCode];
   if (!data) return;
 
-  const { questionKeys, letter, submissions, lang: dataLang } = data;
+  const { questionKeys, assignments, letter, submissions, lang: dataLang } = data;
   const labels = getLabels(dataLang || "TR");
 
+  // Each card corresponds to a question slot; the answer is from the assigned player
   const cards = questionKeys.map((qKey, i) => {
     const questionLabel = labels[qKey];
-    const playerAnswers = room.players
-      .map(p => ({ userId: p.userId, username: p.username, answer: (submissions[p.userId]?.[i] || "").trim() }))
-      .filter(a => a.answer !== "");
-
-    const picked = playerAnswers.length > 0
-      ? playerAnswers[Math.floor(Math.random() * playerAnswers.length)]
-      : { answer: "—", username: "?" };
-
-    return { question: questionLabel, answer: picked.answer, answeredBy: picked.username, all: playerAnswers };
+    // Find which player was assigned to slot i
+    const assignedUserId = Object.entries(assignments).find(([, idx]) => idx === i)?.[0];
+    const player = room.players.find(p => p.userId === assignedUserId);
+    const answer = (submissions[assignedUserId] || "").toString().trim();
+    return {
+      question: questionLabel,
+      answer: answer || "—",
+      answeredBy: player?.username || "?",
+    };
   });
 
   io.to(roomCode).emit("ne_alaka_result", {
