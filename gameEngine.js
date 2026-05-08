@@ -188,13 +188,8 @@ function calculateScores(roomCode, invalidCells, room) {
       const isWrongLetter = word && word.trim() !== "" && word.trim()[0]?.toUpperCase() !== state.letter;
       const isDuplicate  = duplicateCells[cellId];
 
-      if (!word || word.trim() === "") {
-        // Blank = didn't participate; mark bonus issue but don't boost others
-        bonusIssues[p.userId] = true;
-        return;
-      }
-      if (isInvalid || isWrongLetter || isDuplicate) {
-        // Wrote something wrong → mark bonus issue AND boost valid players' bonus
+      if (!word || word.trim() === "" || isInvalid || isWrongLetter || isDuplicate) {
+        // Invalid/blank → 0 points for this column, and valid players get +5 bonus per entry
         bonusIssues[p.userId] = true;
         nonValidCount++;
         return;
