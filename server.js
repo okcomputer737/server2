@@ -215,7 +215,9 @@ io.on("connection", (socket) => {
   socket.on("ne_alaka_submit", ({ roomCode, answers }) => {
     const userId = socket.data.userId;
     if (!userId) return;
-    neAlaka.submitAnswers(roomCode, userId, answers);
+    const room = getRoom(roomCode);
+    if (!room) return;
+    neAlaka.submitAnswers(io, roomCode, room, userId, answers);
   });
 
   // ── OY VER ──

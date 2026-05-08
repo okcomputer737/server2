@@ -74,12 +74,13 @@ function removePlayer(socket) {
 
 function getPublicRooms() {
   return Object.values(rooms)
-    .filter((r) => r.type === "public")
+    .filter((r) => r.type === "public" || r.type === "ne_alaka")
     .map((r) => ({
       code: r.code,
+      type: r.type,
       playerCount: r.players.length,
       players: r.players.map((p) => p.username),
-      theme: r.settings?.theme || "classic",
+      theme: r.type === "ne_alaka" ? "ne_alaka" : (r.settings?.theme || "classic"),
       roundTime: r.settings?.roundTime || 10,
       scoreLimit: r.settings?.scoreLimit || 100,
     }));

@@ -60,7 +60,6 @@ function buildQuestions(playerCount) {
 function startRound(io, roomCode, room) {
   if (!room || !room.players?.length) return;
 
-  // Clear ready state for the new round
   room.readyPlayers = new Set();
 
   const lang = room.settings?.lang || "TR";
@@ -69,7 +68,7 @@ function startRound(io, roomCode, room) {
   const round = (roundData[roomCode]?.round || 0) + 1;
 
   const labels = getLabels(lang);
-  roundData[roomCode] = { questionKeys, letter, submissions: {}, round, lang };
+  roundData[roomCode] = { questionKeys, letter, submissions: {}, round, lang, totalPlayers: room.players.length };
 
   if (roundTimers[roomCode]) { clearTimeout(roundTimers[roomCode]); }
 
@@ -79,15 +78,26 @@ function startRound(io, roomCode, room) {
     questionKeys,
     round,
     lang,
+    totalPlayers: room.players.length,
   });
 
-  // 15s total: 3s countdown + 10s game + 2s submission buffer
-  roundTimers[roomCode] = setTimeout(() => revealResults(io, roomCode, room), 15000);
+  // Fallback timer: 60s in case someone never submits
+  roundTimers[roomCode] = setTimeout(() => revealResults(io, roomCode, room), 60000);
 }
 
-function submitAnswers(roomCode, userId, answers) {
+function submitAnswers(io, roomCode, room, userId, answers) {
   if (!roundData[roomCode]) return;
   roundData[roomCode].submissions[userId] = answers;
+
+  const submittedCount = Object.keys(roundData[roomCode].submissions).length;
+  const totalCount = room.players.length;
+
+  io.to(roomCode).emit("ne_alaka_submissions", { count: submittedCount, total: totalCount });
+
+  if (submittedCount >= totalCount) {
+    if (roundTimers[roomCode]) { clearTimeout(roundTimers[roomCode]); delete roundTimers[roomCode]; }
+    revealResults(io, roomCode, room);
+  }
 }
 
 function revealResults(io, roomCode, room) {
