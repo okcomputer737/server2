@@ -76,14 +76,15 @@ io.on("connection", (socket) => {
   });
 
   // ── ODA OLUŞTUR ──
-  socket.on("create_room", ({ username, type, theme, roundTime, scoreLimit, userId, lang }) => {
+  socket.on("create_room", ({ username, type, theme, roundTime, scoreLimit, userId, lang, maxPlayers }) => {
     if (!username?.trim()) { socket.emit("error", { message: "Kullanıcı adı boş olamaz" }); return; }
     if (username.trim().length > 16) { socket.emit("error", { message: "Kullanıcı adı en fazla 16 karakter" }); return; }
     const uid = userId || socket.id;
     socket.data.userId = uid;
     socket.data.username = username.trim();
     const room = createRoom(socket, username, type, uid);
-    room.settings = { theme: theme || "classic", roundTime: roundTime || 10, scoreLimit: scoreLimit || 250, lang: lang || "TR" };
+    const max = type === "ne_alaka" ? 5 : Math.min(Math.max(maxPlayers || 10, 2), 10);
+    room.settings = { theme: theme || "classic", roundTime: roundTime || 10, scoreLimit: scoreLimit || 200, lang: lang || "TR", maxPlayers: max };
     socket.join(room.code);
     console.log(`🏠 Room created: ${room.code} by "${username}" (${type})`);
     socket.emit("room_created", { code: room.code, type: room.type });
@@ -102,8 +103,9 @@ io.on("connection", (socket) => {
       socket.emit("error", { message: "Bu odada oyun devam ediyor, şu an katılamazsın." });
       return;
     }
-    if (room.type === "ne_alaka" && room.players.length >= 5) {
-      socket.emit("error", { message: "Bu odaya en fazla 5 kişi katılabilir." });
+    const maxAllowed = room.settings?.maxPlayers || (room.type === "ne_alaka" ? 5 : 10);
+    if (room.players.length >= maxAllowed) {
+      socket.emit("error", { message: `Bu oda dolu (max ${maxAllowed} kişi).` });
       return;
     }
 

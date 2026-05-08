@@ -79,6 +79,7 @@ function getPublicRooms() {
       code: r.code,
       type: r.type,
       playerCount: r.players.length,
+      maxPlayers: r.type === "ne_alaka" ? 5 : (r.settings?.maxPlayers || 10),
       players: r.players.map((p) => p.username),
       theme: r.type === "ne_alaka" ? "ne_alaka" : (r.settings?.theme || "classic"),
       roundTime: r.settings?.roundTime || 10,

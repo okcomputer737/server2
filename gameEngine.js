@@ -135,8 +135,12 @@ function startDebate(io, roomCode, room) {
     const colAnswers = [];
     room.players.forEach((p) => {
       const word = subs[p.userId]?.[colIndex];
-      if (!word || word.trim() === "") return;
       const cellId = `${p.userId}_${colIndex}`;
+      // Empty cells are auto-invalid — mark them and skip
+      if (!word || word.trim() === "") {
+        wrongLetterCells[cellId] = true;
+        return;
+      }
       if (word.trim()[0]?.toUpperCase() !== state.letter) {
         wrongLetterCells[cellId] = true;
       } else if (!duplicateCells[cellId]) {
@@ -184,7 +188,13 @@ function calculateScores(roomCode, invalidCells, room) {
       const isWrongLetter = word && word.trim() !== "" && word.trim()[0]?.toUpperCase() !== state.letter;
       const isDuplicate  = duplicateCells[cellId];
 
-      if (!word || word.trim() === "" || isInvalid || isWrongLetter || isDuplicate) {
+      if (!word || word.trim() === "") {
+        // Blank = didn't participate; mark bonus issue but don't boost others
+        bonusIssues[p.userId] = true;
+        return;
+      }
+      if (isInvalid || isWrongLetter || isDuplicate) {
+        // Wrote something wrong → mark bonus issue AND boost valid players' bonus
         bonusIssues[p.userId] = true;
         nonValidCount++;
         return;
