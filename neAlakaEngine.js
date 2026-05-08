@@ -1,5 +1,7 @@
 const LETTERS_TR = "ABCDEFGHIJKLMNOPRSTUVYZÇİÖŞÜ";
+const LETTERS_EN = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const VOWELS_TR = new Set(['A','E','İ','I','O','Ö','U','Ü']);
+const VOWELS_EN = new Set(['A','E','I','O','U']);
 
 const QUESTION_LABELS = {
   kim:        "Kim?",
@@ -13,13 +15,15 @@ const MIDDLE_KEYS = ["kiminle", "nerede", "nasil"];
 
 let roundData  = {};
 let roundTimers = {};
-let letterQueue = [];
+let letterQueues = {};
 
-function buildQueue() {
+function buildQueue(lang) {
+  const letters = lang === "EN" ? LETTERS_EN : LETTERS_TR;
+  const vowels  = lang === "EN" ? VOWELS_EN  : VOWELS_TR;
   const pool = [];
-  for (const l of LETTERS_TR) {
+  for (const l of letters) {
     pool.push(l);
-    if (VOWELS_TR.has(l)) pool.push(l);
+    if (vowels.has(l)) pool.push(l);
   }
   for (let i = pool.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -29,9 +33,11 @@ function buildQueue() {
   return pool.filter(l => !seen.has(l) && seen.add(l));
 }
 
-function getNextLetter() {
-  if (letterQueue.length === 0) letterQueue = buildQueue();
-  return letterQueue.pop();
+function getNextLetter(roomCode, lang) {
+  if (!letterQueues[roomCode] || letterQueues[roomCode].length === 0) {
+    letterQueues[roomCode] = buildQueue(lang);
+  }
+  return letterQueues[roomCode].pop();
 }
 
 function buildQuestions(playerCount) {
@@ -49,8 +55,12 @@ function buildQuestions(playerCount) {
 function startRound(io, roomCode, room) {
   if (!room || !room.players?.length) return;
 
+  // Clear ready state for the new round
+  room.readyPlayers = new Set();
+
+  const lang = room.settings?.lang || "TR";
   const questionKeys = buildQuestions(room.players.length);
-  const letter = getNextLetter();
+  const letter = getNextLetter(roomCode, lang);
   const round = (roundData[roomCode]?.round || 0) + 1;
 
   roundData[roomCode] = { questionKeys, letter, submissions: {}, round };
@@ -64,8 +74,8 @@ function startRound(io, roomCode, room) {
     round,
   });
 
-  // 13s total: 3s countdown + 10s game
-  roundTimers[roomCode] = setTimeout(() => revealResults(io, roomCode, room), 13000);
+  // 15s total: 3s countdown + 10s game + 2s submission buffer
+  roundTimers[roomCode] = setTimeout(() => revealResults(io, roomCode, room), 15000);
 }
 
 function submitAnswers(roomCode, userId, answers) {
@@ -89,7 +99,7 @@ function revealResults(io, roomCode, room) {
 
     const picked = playerAnswers.length > 0
       ? playerAnswers[Math.floor(Math.random() * playerAnswers.length)]
-      : { answer: "???", username: "?" };
+      : { answer: "—", username: "?" };
 
     return { question: questionLabel, answer: picked.answer, answeredBy: picked.username, all: playerAnswers };
   });
@@ -105,6 +115,7 @@ function revealResults(io, roomCode, room) {
 function resetRound(roomCode) {
   if (roundTimers[roomCode]) { clearTimeout(roundTimers[roomCode]); delete roundTimers[roomCode]; }
   delete roundData[roomCode];
+  delete letterQueues[roomCode];
 }
 
 module.exports = { startRound, submitAnswers, revealResults, resetRound };

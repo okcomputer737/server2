@@ -76,14 +76,14 @@ io.on("connection", (socket) => {
   });
 
   // ── ODA OLUŞTUR ──
-  socket.on("create_room", ({ username, type, theme, roundTime, scoreLimit, userId }) => {
+  socket.on("create_room", ({ username, type, theme, roundTime, scoreLimit, userId, lang }) => {
     if (!username?.trim()) { socket.emit("error", { message: "Kullanıcı adı boş olamaz" }); return; }
     if (username.trim().length > 16) { socket.emit("error", { message: "Kullanıcı adı en fazla 16 karakter" }); return; }
     const uid = userId || socket.id;
     socket.data.userId = uid;
     socket.data.username = username.trim();
     const room = createRoom(socket, username, type, uid);
-    room.settings = { theme: theme || "classic", roundTime: roundTime || 10, scoreLimit: scoreLimit || 250 };
+    room.settings = { theme: theme || "classic", roundTime: roundTime || 10, scoreLimit: scoreLimit || 250, lang: lang || "TR" };
     socket.join(room.code);
     console.log(`🏠 Room created: ${room.code} by "${username}" (${type})`);
     socket.emit("room_created", { code: room.code, type: room.type });
@@ -177,6 +177,8 @@ io.on("connection", (socket) => {
 
     if (room.players.length >= 1 && room.players.every(p => room.readyPlayers.has(p.userId))) {
       console.log(`🚀 All ready in ${roomCode}, auto-starting (type=${room.type})...`);
+      room.readyPlayers = new Set();
+      broadcastRoomUpdate(roomCode);
       setTimeout(() => {
         if (room.type === "ne_alaka") neAlaka.startRound(io, roomCode, room);
         else startGame(io, roomCode, room);
