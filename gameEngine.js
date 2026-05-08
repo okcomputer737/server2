@@ -52,7 +52,7 @@ function startGame(io, roomCode, room) {
   const themeKey = settings.theme || "classic";
   const theme = THEMES[themeKey] || THEMES.classic;
   const columns = theme.columns;
-  const lang = theme.lang;
+  const lang = settings.lang || theme.lang;
   const letter = getNextLetter(roomCode, lang);
   const nextRound = (gameState[roomCode]?.round || 0) + 1;
 

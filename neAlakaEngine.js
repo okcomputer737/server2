@@ -3,13 +3,18 @@ const LETTERS_EN = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const VOWELS_TR = new Set(['A','E','İ','I','O','Ö','U','Ü']);
 const VOWELS_EN = new Set(['A','E','I','O','U']);
 
-const QUESTION_LABELS = {
-  kim:        "Kim?",
-  kiminle:    "Kiminle?",
-  nerede:     "Nerede?",
-  nasil:      "Nasıl?",
-  ne_yapiyor: "Ne Yapıyor?",
+const QUESTION_LABELS_TR = {
+  kim: "Kim?", kiminle: "Kiminle?", nerede: "Nerede?",
+  nasil: "Nasıl?", ne_yapiyor: "Ne Yapıyor?",
 };
+const QUESTION_LABELS_EN = {
+  kim: "Who?", kiminle: "With Whom?", nerede: "Where?",
+  nasil: "How?", ne_yapiyor: "Doing What?",
+};
+
+function getLabels(lang) {
+  return lang === "EN" ? QUESTION_LABELS_EN : QUESTION_LABELS_TR;
+}
 
 const MIDDLE_KEYS = ["kiminle", "nerede", "nasil"];
 
@@ -63,15 +68,17 @@ function startRound(io, roomCode, room) {
   const letter = getNextLetter(roomCode, lang);
   const round = (roundData[roomCode]?.round || 0) + 1;
 
-  roundData[roomCode] = { questionKeys, letter, submissions: {}, round };
+  const labels = getLabels(lang);
+  roundData[roomCode] = { questionKeys, letter, submissions: {}, round, lang };
 
   if (roundTimers[roomCode]) { clearTimeout(roundTimers[roomCode]); }
 
   io.to(roomCode).emit("ne_alaka_state", {
     letter,
-    questions: questionKeys.map(k => QUESTION_LABELS[k]),
+    questions: questionKeys.map(k => labels[k]),
     questionKeys,
     round,
+    lang,
   });
 
   // 15s total: 3s countdown + 10s game + 2s submission buffer
@@ -89,10 +96,11 @@ function revealResults(io, roomCode, room) {
   const data = roundData[roomCode];
   if (!data) return;
 
-  const { questionKeys, letter, submissions } = data;
+  const { questionKeys, letter, submissions, lang: dataLang } = data;
+  const labels = getLabels(dataLang || "TR");
 
   const cards = questionKeys.map((qKey, i) => {
-    const questionLabel = QUESTION_LABELS[qKey];
+    const questionLabel = labels[qKey];
     const playerAnswers = room.players
       .map(p => ({ userId: p.userId, username: p.username, answer: (submissions[p.userId]?.[i] || "").trim() }))
       .filter(a => a.answer !== "");
